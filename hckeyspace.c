@@ -17,7 +17,6 @@
  * Name........: keyspace
  * Autor.......: Jens Steube <jens.steube@gmail.com>
  * License.....: MIT
- * Python module by anthrax@insight-labs.org
  */
 
 #define CHARSIZ         0x100
@@ -45,6 +44,11 @@ typedef struct
 
 } cs_t;
 
+
+hcstat_table_t *root_table_buf;
+hcstat_table_t *markov_table_buf;
+
+
 uint8_t hex_convert (const uint8_t c)
 {
   return (uint8_t)((c & 15) + (c >> 6) * 9);
@@ -70,6 +74,8 @@ void mp_css_to_uniq_tbl (const int css_cnt, cs_t *css_buf, int uniq_tbls[SP_PW_M
       uniq_tbl[c] = 1;
     }
   }
+
+  free(css_buf);
 }
 
 void mp_add_cs_buf (const uint32_t in_len, const uint8_t *in_buf, const int css_pos, cs_t *css_buf)
@@ -296,6 +302,7 @@ uint64_t sp_get_sum (const int start, const int stop, const cs_t *root_css_buf)
     sum *= root_css_buf[i].cs_len;
   }
 
+free (root_css_buf);
   return (sum);
 }
 
@@ -307,11 +314,13 @@ int sp_comp_val (const void *p1, const void *p2)
   return b2->val - b1->val;
 }
 
-void sp_setup_tbl (const char *markov_hcstat, hcstat_table_t *root_table_buf, hcstat_table_t *markov_table_buf)
+void sp_setup_tbl (hcstat_table_t *root_table_buf, hcstat_table_t *markov_table_buf)
 {
   /**
    * Initialize hcstats
    */
+
+  char *markov_hcstat = SP_HCSTAT;
 
   uint64_t *root_stats_buf = (uint64_t *) calloc (SP_ROOT_CNT, sizeof (uint64_t));
 
@@ -441,9 +450,11 @@ void sp_setup_tbl (const char *markov_hcstat, hcstat_table_t *root_table_buf, hc
   }
 }
 
-void sp_tbl_to_css (hcstat_table_t *root_table_buf, hcstat_table_t *markov_table_buf, cs_t *root_css_buf, cs_t *markov_css_buf, const uint32_t markov_threshold, int uniq_tbls[SP_PW_MAX][CHARSIZ])
+
+void sp_tbl_to_css (hcstat_table_t *root_table_buf, hcstat_table_t *markov_table_buf, cs_t *root_css_buf, cs_t *markov_css_buf, int uniq_tbls[SP_PW_MAX][CHARSIZ])
 {
   int i;
+  int markov_threshold = CHARSIZ;
 
   for (i = 0; i < SP_ROOT_CNT; i++)
   {
@@ -480,10 +491,14 @@ void sp_tbl_to_css (hcstat_table_t *root_table_buf, hcstat_table_t *markov_table
 
     cs->cs_len++;
   }
+
+  free (markov_css_buf);
+
 }
 
-uint64_t keyspace (const int in_len, const uint8_t *in_buf, cs_t mp_sys[5], cs_t mp_usr[4], const char *markov_hcstat, const uint32_t markov_threshold, const int opts_type, const int hex_charset)
+uint64_t keyspace (const int in_len, const uint8_t *in_buf, cs_t mp_sys[5], cs_t mp_usr[4],  const int opts_type, const int hex_charset)
 {
+
   int css_cnt = 0;
 
   cs_t *css_buf = mp_gen_css (in_len, in_buf, mp_sys, mp_usr, &css_cnt, hex_charset);
@@ -509,24 +524,25 @@ uint64_t keyspace (const int in_len, const uint8_t *in_buf, cs_t mp_sys[5], cs_t
 
     css_buf = css_buf_unicode;
     css_cnt = css_cnt_unicode;
+
+    free(css_buf_unicode);
+
   }
 
+
+
   int uniq_tbls[SP_PW_MAX][CHARSIZ];
-
   memset (uniq_tbls, 0, sizeof (uniq_tbls));
+mp_css_to_uniq_tbl (css_cnt, css_buf, uniq_tbls);
 
-  mp_css_to_uniq_tbl (css_cnt, css_buf, uniq_tbls);
+ cs_t *root_css_buf   = (cs_t *) calloc (SP_PW_MAX,           sizeof (cs_t));
+ cs_t *markov_css_buf = (cs_t *) calloc (SP_PW_MAX * CHARSIZ, sizeof (cs_t));
 
-  hcstat_table_t *root_table_buf   = (hcstat_table_t *) calloc (SP_ROOT_CNT,   sizeof (hcstat_table_t));
-  hcstat_table_t *markov_table_buf = (hcstat_table_t *) calloc (SP_MARKOV_CNT, sizeof (hcstat_table_t));
 
-  sp_setup_tbl (markov_hcstat, root_table_buf, markov_table_buf);
+  
+  sp_tbl_to_css (root_table_buf, markov_table_buf, root_css_buf, markov_css_buf, uniq_tbls);
 
-  cs_t *root_css_buf   = (cs_t *) calloc (SP_PW_MAX,           sizeof (cs_t));
-  cs_t *markov_css_buf = (cs_t *) calloc (SP_PW_MAX * CHARSIZ, sizeof (cs_t));
-
-  sp_tbl_to_css (root_table_buf, markov_table_buf, root_css_buf, markov_css_buf, markov_threshold, uniq_tbls);
-
+   
   int css_cnt_r;
 
   if (css_cnt < 6)
@@ -578,10 +594,9 @@ uint64_t calcKeyspace (char *mask, int hash_mode, char *custom_charset_1,char *c
   #define IDX_CUSTOM_CHARSET_4  '4'
   #define IDX_HELP              'h'
 
-
+  //int      hash_mode            = 0;
   int      hex_charset          = 0;
-  int      markov_threshold     = CHARSIZ;
-  char    *markov_hcstat        = SP_HCSTAT;
+ 
 
   int opts_type = 0;
 
@@ -623,7 +638,9 @@ uint64_t calcKeyspace (char *mask, int hash_mode, char *custom_charset_1,char *c
   if (custom_charset_3) mp_setup_usr (mp_sys, mp_usr, strlen (custom_charset_3), (uint8_t *) custom_charset_3, 2, hex_charset);
   if (custom_charset_4) mp_setup_usr (mp_sys, mp_usr, strlen (custom_charset_4), (uint8_t *) custom_charset_4, 3, hex_charset);
 
-  const uint64_t n = keyspace (strlen (mask), (uint8_t *) mask, mp_sys, mp_usr, markov_hcstat, markov_threshold, opts_type, hex_charset);
+  const uint64_t n = keyspace (strlen (mask), (uint8_t *) mask, mp_sys, mp_usr, opts_type, hex_charset);
+
+  //printf ("%llu\n", (unsigned long long int) n);
 
   return n;
 }
@@ -645,6 +662,11 @@ static PyMethodDef module_methods[] = {
 PyMODINIT_FUNC inithckeyspace(void)
 {
     PyObject *m = Py_InitModule3("hckeyspace", module_methods, module_docstring);
+    root_table_buf   = (hcstat_table_t *) calloc (SP_ROOT_CNT,   sizeof (hcstat_table_t));
+    markov_table_buf = (hcstat_table_t *) calloc (SP_MARKOV_CNT, sizeof (hcstat_table_t));
+    sp_setup_tbl (root_table_buf, markov_table_buf);
+
+
     if (m == NULL)
         return;
 }
@@ -660,11 +682,14 @@ uint64_t value;
       return NULL;
   }
 
+
+
  value = calcKeyspace(mask,hash_mode,custom_charset_1,custom_charset_2,custom_charset_3,custom_charset_4);
 
   PyObject *ret = Py_BuildValue("L", value);
     return ret;
 
 }
+
 
 
