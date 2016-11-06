@@ -15,7 +15,8 @@
 
 /**
  * Name........: keyspace
- * Autor.......: Jens Steube <jens.steube@gmail.com>
+ * Author.......: Jens Steube <jens.steube@gmail.com>
+ * Python module by Anthr@X <anthrax@insight-labs.org>
  * License.....: MIT
  */
 
@@ -520,7 +521,6 @@ uint64_t keyspace (const int in_len, const uint8_t *in_buf, cs_t mp_sys[5], cs_t
       css_buf_unicode[j + 1].cs_len = 1;
     }
 
-    free (css_buf);
 
     css_buf = css_buf_unicode;
     css_cnt = css_cnt_unicode;
